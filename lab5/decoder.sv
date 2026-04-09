@@ -47,7 +47,7 @@ module decoder (
     a_sel_o      = OP_A_ZERO; // 0
     b_sel_o      = OP_B_INCR; // конст. 4
     alu_op_o     = ALU_ADD;
-    csr_op_o     = CSR_OP_NONE; // нет системных инструкции
+    csr_op_o     = 1'b0; // нет системных инструкции
     csr_we_o     = 1'b0;
     mem_req_o    = 1'b0;
     mem_we_o     = 1'b0;
@@ -73,15 +73,71 @@ module decoder (
           gpr_we_o = 1'b1; // разрешение в регистровый файл
           wb_sel_o = WB_EX_RESULT; // результат берем из АЛУ
           case (funct3)
-            3'b000: alu_op_o = (funct7 == 7'b0000000) ? ALU_ADD : ALU_SUB;
-            3'b001: alu_op_o = ALU_SLL;
-            3'b010: alu_op_o = ALU_SLT;
-            3'b011: alu_op_o = ALU_SLTU;
-            3'b100: alu_op_o = ALU_XOR;
-            3'b101: alu_op_o = (funct7 == 7'b0000000) ? ALU_SRL : ALU_SRA;
-            3'b110: alu_op_o = ALU_OR;
-            3'b111: alu_op_o = ALU_AND;
-            default: illegal_instr_o = 1'b1;
+            3'b000: begin 
+                    if (funct7 == 7'b0000000) alu_op_o = ALU_ADD;
+                    else if (funct7 == 7'b0100000) alu_op_o = ALU_SUB;
+                    else begin 
+                    illegal_instr_o = 1'b1;
+                    gpr_we_o = 1'b0;
+                    end
+                   end
+            3'b001: begin
+                if (funct7 == 7'b0000000) alu_op_o = ALU_SLL;
+                                    else begin 
+                    illegal_instr_o = 1'b1;
+                    gpr_we_o = 1'b0;
+                    end
+            end
+            3'b010: 
+            begin
+                if (funct7 == 7'b0000000) alu_op_o = ALU_SLTS;
+                                    else begin 
+                    illegal_instr_o = 1'b1;
+                    gpr_we_o = 1'b0;
+                    end
+            end
+            3'b011: begin
+                if (funct7 == 7'b0000000) alu_op_o = ALU_SLTU;
+                                    else begin 
+                    illegal_instr_o = 1'b1;
+                    gpr_we_o = 1'b0;
+                    end
+            end
+
+            3'b100: begin
+                if (funct7 == 7'b0000000) alu_op_o = ALU_XOR;
+                                    else begin 
+                    illegal_instr_o = 1'b1;
+                    gpr_we_o = 1'b0;
+                    end
+            end
+            3'b101: begin
+                if (funct7 == 7'b0000000) alu_op_o = ALU_SRL;
+                else if (funct7 == 7'b0100000) alu_op_o = ALU_SRA;
+                                    else begin 
+                    illegal_instr_o = 1'b1;
+                    gpr_we_o = 1'b0;
+                    end
+            end
+            3'b110: begin
+                if (funct7 == 7'b0000000) alu_op_o = ALU_OR;
+                                    else begin 
+                    illegal_instr_o = 1'b1;
+                    gpr_we_o = 1'b0;
+                    end
+            end
+           
+            3'b111: begin
+                if (funct7 == 7'b0000000) alu_op_o = ALU_AND;
+                                    else begin 
+                    illegal_instr_o = 1'b1;
+                    gpr_we_o = 1'b0;
+                    end
+                end
+            default: begin
+             illegal_instr_o = 1'b1;
+             gpr_we_o = 1'b0;
+             end
           endcase
         end
         
@@ -93,21 +149,30 @@ module decoder (
           wb_sel_o = WB_EX_RESULT;
           case (funct3)
             3'b000: alu_op_o = ALU_ADD;
-            3'b010: alu_op_o = ALU_SLT;
+            3'b010: alu_op_o = ALU_SLTS;
             3'b011: alu_op_o = ALU_SLTU;
             3'b100: alu_op_o = ALU_XOR;
             3'b110: alu_op_o = ALU_OR;
             3'b111: alu_op_o = ALU_AND;
             3'b001: begin
               if (funct7 == 7'b0000000) alu_op_o = ALU_SLL; // сдвиг влево на конст. старшие 7 бит должны быть нулями для сдвига
-              else illegal_instr_o = 1'b1;
+              else begin 
+              illegal_instr_o = 1'b1;
+              gpr_we_o = 1'b0;
+             end
             end
             3'b101: begin
               if (funct7 == 7'b0000000) alu_op_o = ALU_SRL; // аналогично, только свдиг вправо
               else if (funct7 == 7'b0100000) alu_op_o = ALU_SRA; // арифметический сдвиг
-              else illegal_instr_o = 1'b1;
+              else begin 
+              illegal_instr_o = 1'b1;
+              gpr_we_o = 1'b0;
+             end
             end
-            default: illegal_instr_o = 1'b1;
+            default:begin
+             illegal_instr_o = 1'b1;
+             gpr_we_o = 1'b1;
+             end
           endcase
         end
       
@@ -126,7 +191,11 @@ module decoder (
             3'b010: mem_size_o = LDST_W; // слово 32 бита
             3'b100: mem_size_o = LDST_BU; // байт без знака
             3'b101: mem_size_o = LDST_HU; // полуслово без знака
-            default: illegal_instr_o = 1'b1;
+            default: begin
+            illegal_instr_o = 1'b1;
+            mem_req_o = 1'b0;
+            gpr_we_o = 1'b0;
+            end
           endcase
         end
        
@@ -142,7 +211,12 @@ module decoder (
             3'b000: mem_size_o = LDST_B; // байт
             3'b001: mem_size_o = LDST_H; // полуслово 16 бит - сжатый
             3'b010: mem_size_o = LDST_W; // слово
-            default: illegal_instr_o = 1'b1;
+            default: begin
+            illegal_instr_o = 1'b1;
+            mem_req_o = 1'b0;
+            gpr_we_o = 1'b0;
+            mem_we_o = 1'b0;
+            end
           endcase
         end
    // условный переход
@@ -153,26 +227,36 @@ module decoder (
           case (funct3)
             3'b000: alu_op_o = ALU_EQ; // равно
             3'b001: alu_op_o = ALU_NE; // неравно 
-            3'b100: alu_op_o = ALU_LT; // меньше(знаковое)
-            3'b101: alu_op_o = ALU_GE; // больше или равно (знаковое)
+            3'b100: alu_op_o = ALU_LTS; // меньше(знаковое)
+            3'b101: alu_op_o = ALU_GES; // больше или равно (знаковое)
             3'b110: alu_op_o = ALU_LTU; // меньше (беззнаковое)
             3'b111: alu_op_o = ALU_GEU; // больше или равно(беззнаковое)
-            default: illegal_instr_o = 1'b1;
+            default: begin 
+            illegal_instr_o = 1'b1;
+            branch_o = 1'b0;
+            end
           endcase
         end
 
         // безусловный переход с сохранением адреса
         JAL_OPCODE: begin
+          a_sel_o = 1'b1;
           jal_o = 1'b1;
           gpr_we_o = 1'b1;
         end
 
         JALR_OPCODE: begin
-          jalr_o = 1'b1;
-          gpr_we_o = 1'b1;
-          a_sel_o = OP_A_RS1;
-          b_sel_o = OP_B_IMM_I;
-          alu_op_o = ALU_ADD; // адрес перехода
+        if (funct3 == 3'b000) begin
+              jalr_o = 1'b1;
+              gpr_we_o = 1'b1;
+              a_sel_o = OP_A_CURR_PC;
+              b_sel_o = OP_B_INCR;
+              alu_op_o = ALU_ADD; // адрес перехода \
+          end else begin
+                illegal_instr_o = 1'b1;
+                gpr_we_o = 1'b0;
+                jalr_o = 1'b0;
+              end
         end
        
        // загрузка верхней части - расширяем кол-во битов до 32
@@ -222,7 +306,7 @@ module decoder (
                 3'b101: csr_op_o = CSR_RWI;
                 3'b110: csr_op_o = CSR_RSI;
                 3'b111: csr_op_o = CSR_RCI;
-                default: csr_op_o = CSR_OP_NONE;
+                default: csr_op_o = 1'b0;
               endcase
             end
             default: illegal_instr_o = 1'b1;
