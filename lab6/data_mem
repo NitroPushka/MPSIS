@@ -1,0 +1,42 @@
+// Память данных с побайтовой записью (синхронное чтение)
+module data_mem (
+  input  logic        clk_i,
+  input  logic        mem_req_i,       // запрос (1 – активен)
+  input  logic        write_enable_i,  // 1 – запись, 0 – чтение
+  input  logic [3:0]  byte_enable_i,   // маска байтов (1 – разрешить запись в байт)
+  input  logic [31:0] addr_i,          // байтовый адрес
+  input  logic [31:0] write_data_i,    // данные для записи
+  output logic [31:0] read_data_o,     // прочитанные данные (на след. такт)
+  output logic        ready_o          // всегда 1 (память быстрая)
+);
+  // Параметры: 1024 байта = 256 слов по 4 байта
+  localparam WORDS = 256;
+  logic [31:0] mem [0:WORDS-1];
+
+  // Преобразование байтового адреса в индекс слова
+  wire [7:0] word_idx = addr_i[31:2];   // отбрасываем младшие 2 бита
+
+  // Маска байтов для записи (32-битная)
+  logic [31:0] mask;
+  assign mask = { {8{byte_enable_i[3]}}, {8{byte_enable_i[2]}},
+                  {8{byte_enable_i[1]}}, {8{byte_enable_i[0]}} };
+
+  // Запись (по фронту такта, если запрос и разрешена запись)
+  always_ff @(posedge clk_i) begin
+    if (mem_req_i && write_enable_i) begin
+      mem[word_idx] <= (mem[word_idx] & ~mask) | (write_data_i & mask);
+    end
+  end
+
+  // Синхронное чтение (регистрируем результат)
+  logic [31:0] rd_reg;
+  always_ff @(posedge clk_i) begin
+    if (mem_req_i && !write_enable_i) begin
+      rd_reg <= mem[word_idx];
+    end
+  end
+  assign read_data_o = rd_reg;
+
+  // Память всегда отвечает за один такт
+  assign ready_o = 1'b1;
+endmodule
