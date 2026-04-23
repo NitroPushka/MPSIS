@@ -14,7 +14,7 @@ module processor_core (
   output logic        mem_we_o,       // 1 - запись, 0 - чтение
   output logic [31:0] mem_wd_o,       // Данные для записи в память (всегда из rs2)
 
-  input  logic        irq_req_i, // Запрос прерывания от внешнего устройства
+  input  logic        irq_req_i,
   output logic        irq_ret_o   // Сигнал, что возврат из прерывания выполнен
 );
 
@@ -25,7 +25,7 @@ module processor_core (
 
   logic ill_instr;   
   logic irq;    
-  logic trap;        // Обобщённый сигнал
+  logic trap;
   
   assign trap = irq | ill_instr;
 
@@ -82,8 +82,7 @@ module processor_core (
   assign imm_J = {{11{instr_i[31]}}, instr_i[31], instr_i[19:12], instr_i[20], instr_i[30:21], 1'b0};
   assign imm_Z = {27'd0, instr_i[19:15]};
   
-    // разрешение запись в регистр
-  assign we = ~(trap | stall_i) & gpr_we;
+  assign we = ~(trap | stall_i) ;
 
   register_file register(
     .clk_i(clk_i),
@@ -129,18 +128,27 @@ module processor_core (
 
   decoder main_decoder(
     .fetched_instr_i(instr_i),
-    .a_sel_o(a_sel), .b_sel_o(b_sel), .alu_op_o(alu_op),
-    .csr_op_o(csr_op), .csr_we_o(csr_we),
-    .mem_req_o(mem_req), .mem_we_o(mem_we), .mem_size_o(mem_size_o),
-    .gpr_we_o(gpr_we), .wb_sel_o(wb_sel),
+    .a_sel_o(a_sel),
+    .b_sel_o(b_sel),
+    .alu_op_o(alu_op),
+    .csr_op_o(csr_op),
+    .csr_we_o(csr_we),
+    .mem_req_o(mem_req),
+    .mem_we_o(mem_we),
+    .mem_size_o(mem_size_o),
+    .gpr_we_o(gpr_we),
+    .wb_sel_o(wb_sel),
     .illegal_instr_o(ill_instr),
     .branch_o(branch), .jal_o(jal), .jalr_o(jalr), .mret_o(mret)
   );
 
 
   alu ALU(
-    .a_i(a_i), .b_i(b_i), .alu_op_i(alu_op),
-    .flag_o(alu_flag), .result_o(alu_result)
+    .a_i(a_i),
+    .b_i(b_i),
+    .alu_op_i(alu_op),
+    .flag_o(alu_flag),
+    .result_o(alu_result)
   );
 
 
@@ -178,7 +186,8 @@ module processor_core (
   );
 
   fulladder32 adder32_bj(
-  .a_i(PC), .b_i(jb_or_4),
+  .a_i(PC),
+  .b_i(jb_or_4),
   .carry_i(1'b0),
   .sum_o(bj4_sum),
   .carry_o() 
