@@ -34,42 +34,7 @@ module processor_core (
   assign imm_J = {{11{instr_i[31]}}, instr_i[31], instr_i[19:12], instr_i[20], instr_i[30:21], 1'b0};
   assign imm_Z = {27'd0, instr_i[19:15]};
 
-  logic ill_instr;   
-  logic irq;            // Внутреннее прерывание (от interrupt_controller)
-  logic trap;        // Обобщённый сигнал: = irq ИЛИ ill_instr (нужен для переключения PC)
-  assign trap = irq | ill_instr;
-
-  logic [1:0] a_sel;    // Выбор источника первого операнда АЛУ (RS1, PC, 0)
-  logic [2:0] b_sel;   // Выбор источника второго операнда АЛУ (RS2, imm_I, imm_U, imm_S, +4)
-  logic [1:0] wb_sel;    // Выбор источника данных для записи в регистровый файл (АЛУ, память, CSR)
-  logic [4:0] alu_op;   // Код операции для АЛУ (сложение, вычитание, AND, OR...)
-  logic gpr_we;      // Разрешение записи в регистровый файл (от декодера, без учёта trap/stall)
-  
-  logic branch;          // 1 – инструкция условного перехода (beq, bne, blt...)
-  logic jal;            // 1 – безусловный переход jal
-  logic jalr;     // 1 – безусловный переход jalr (через регистр)
-  logic mret;            // 1 – инструкция возврата из прерывания (mret)
-
-
-  logic mem_req;   // 1 – нужно обратиться к памяти
-  logic mem_we;          // 1 – запись, 0 – чтение
-
-  logic [2:0] csr_op;    // Код операции CSR (csrrw, csrrs, csrrc)
-  logic csr_we;     // Разрешение записи в CSR
-
-  logic [31:0] rd1;      
-  logic [31:0] rd2;      
-  logic [31:0] wb_data;  
-  logic we; 
-
-  assign we = ~(trap | stall_i) & gpr_we;
-
-  logic [31:0] a_i;     
-  logic [31:0] b_i;   
-  logic [31:0] alu_result; 
-  logic alu_flag;    
-
-  // Мультиплексор a_sel: выбирает, откуда взять первый операнд
+    // Мультиплексор a_sel: выбирает, откуда взять первый операнд
   always_comb begin
     case(a_sel)
       OP_A_RS1:     a_i = rd1;        // Обычная операция: из регистра rs1
@@ -100,6 +65,85 @@ module processor_core (
       default:      wb_data = alu_result;
     endcase
   end
+
+  decoder main_decoder(
+    .fetched_instr_i(instr_i),
+    .a_sel_o(a_sel), .b_sel_o(b_sel), .alu_op_o(alu_op),
+    .csr_op_o(csr_op), .csr_we_o(csr_we),
+    .mem_req_o(mem_req), .mem_we_o(mem_we), .mem_size_o(mem_size_o),
+    .gpr_we_o(gpr_we), .wb_sel_o(wb_sel),
+    .illegal_instr_o(ill_instr),
+    .branch_o(branch), .jal_o(jal), .jalr_o(jalr), .mret_o(mret)
+  );
+
+  register_file register(
+    .clk_i(clk_i),
+    .write_enable_i(we),
+    .write_addr_i(instr_i[11:7]),      // rd
+    .read_addr1_i(instr_i[19:15]),     // rs1
+    .read_addr2_i(instr_i[24:20]),     // rs2
+    .write_data_i(wb_data),
+    .read_data1_o(rd1),
+    .read_data2_o(rd2)
+  );
+
+  alu ALU(
+    .a_i(a_i), .b_i(b_i), .alu_op_i(alu_op),
+    .flag_o(alu_flag), .result_o(alu_result)
+  );
+
+  fulladder32 adder32_bj( .a_i(PC), .b_i(jb_or_4), .carry_i(1'b0), .sum_o(bj4_sum), .carry_o() );
+  fulladder32 adder32_jalr( .a_i(rd1), .b_i(imm_I), .carry_i(1'b0), .sum_o(jalr_sum), .carry_o() );
+
+  csr_controller control_status_registers(
+    .clk_i(clk_i), .rst_i(rst_i), .trap_i(trap), .opcode_i(csr_op),
+    .addr_i(instr_i[31:20]), .pc_i(PC), .mcause_i(mcause),
+    .rs1_data_i(rd1), .imm_data_i(imm_Z), .write_enable_i(csr_we),
+    .read_data_o(csr_wd), .mie_o(mie), .mepc_o(mepc), .mtvec_o(mtvec)
+  );
+
+  interrupt_controller irq_controller(
+    .clk_i(clk_i), .rst_i(rst_i), .exception_i(ill_instr),
+    .irq_req_i(irq_req_i), .mie_i(mie[16]), .mret_i(mret),
+    .irq_ret_o(irq_ret_o), .irq_cause_o(irq_cause), .irq_o(irq)
+  );
+
+  logic ill_instr;   
+  logic irq;            // Внутреннее прерывание (от interrupt_controller)
+  logic trap;        // Обобщённый сигнал: = irq ИЛИ ill_instr (нужен для переключения PC)
+  assign trap = irq | ill_instr;
+
+  logic [1:0] a_sel;    // Выбор источника первого операнда АЛУ (RS1, PC, 0)
+  logic [2:0] b_sel;   // Выбор источника второго операнда АЛУ (RS2, imm_I, imm_U, imm_S, +4)
+  logic [1:0] wb_sel;    // Выбор источника данных для записи в регистровый файл (АЛУ, память, CSR)
+  logic [4:0] alu_op;   // Код операции для АЛУ (сложение, вычитание, AND, OR...)
+  logic gpr_we;      // Разрешение записи в регистровый файл (от декодера, без учёта trap/stall)
+  
+  logic branch;          // 1 – инструкция условного перехода (beq, bne, blt...)
+  logic jal;            // 1 – безусловный переход jal
+  logic jalr;     // 1 – безусловный переход jalr (через регистр)
+  logic mret;            // 1 – инструкция возврата из прерывания (mret)
+
+
+  logic mem_req;   // 1 – нужно обратиться к памяти
+  logic mem_we;          // 1 – запись, 0 – чтение
+
+  logic [2:0] csr_op;    // Код операции CSR (csrrw, csrrs, csrrc)
+  logic csr_we;     // Разрешение записи в CSR
+
+  logic [31:0] rd1;      
+  logic [31:0] rd2;      
+  logic [31:0] wb_data;  
+  logic we; 
+
+  // разрешение запись в регистр
+  assign we = ~(trap | stall_i) & gpr_we;
+
+  logic [31:0] a_i;     
+  logic [31:0] b_i;   
+  logic [31:0] alu_result; 
+  logic alu_flag;    
+
 
 
   logic [31:0] PC;  
@@ -157,47 +201,5 @@ module processor_core (
 
   // При illegal instruction код причины = 2 (стандарт RISC-V), иначе – код от irq_controller
   assign mcause = ill_instr ? 32'h0000_0002 : irq_cause;
-
-  decoder main_decoder(
-    .fetched_instr_i(instr_i),
-    .a_sel_o(a_sel), .b_sel_o(b_sel), .alu_op_o(alu_op),
-    .csr_op_o(csr_op), .csr_we_o(csr_we),
-    .mem_req_o(mem_req), .mem_we_o(mem_we), .mem_size_o(mem_size_o),
-    .gpr_we_o(gpr_we), .wb_sel_o(wb_sel),
-    .illegal_instr_o(ill_instr),
-    .branch_o(branch), .jal_o(jal), .jalr_o(jalr), .mret_o(mret)
-  );
-
-  register_file register(
-    .clk_i(clk_i),
-    .write_enable_i(we),
-    .write_addr_i(instr_i[11:7]),      // rd
-    .read_addr1_i(instr_i[19:15]),     // rs1
-    .read_addr2_i(instr_i[24:20]),     // rs2
-    .write_data_i(wb_data),
-    .read_data1_o(rd1),
-    .read_data2_o(rd2)
-  );
-
-  alu ALU(
-    .a_i(a_i), .b_i(b_i), .alu_op_i(alu_op),
-    .flag_o(alu_flag), .result_o(alu_result)
-  );
-
-  fulladder32 adder32_bj( .a_i(PC), .b_i(jb_or_4), .carry_i(1'b0), .sum_o(bj4_sum), .carry_o() );
-  fulladder32 adder32_jalr( .a_i(rd1), .b_i(imm_I), .carry_i(1'b0), .sum_o(jalr_sum), .carry_o() );
-
-  csr_controller control_status_registers(
-    .clk_i(clk_i), .rst_i(rst_i), .trap_i(trap), .opcode_i(csr_op),
-    .addr_i(instr_i[31:20]), .pc_i(PC), .mcause_i(mcause),
-    .rs1_data_i(rd1), .imm_data_i(imm_Z), .write_enable_i(csr_we),
-    .read_data_o(csr_wd), .mie_o(mie), .mepc_o(mepc), .mtvec_o(mtvec)
-  );
-
-  interrupt_controller irq_controller(
-    .clk_i(clk_i), .rst_i(rst_i), .exception_i(ill_instr),
-    .irq_req_i(irq_req_i), .mie_i(mie[16]), .mret_i(mret),
-    .irq_ret_o(irq_ret_o), .irq_cause_o(irq_cause), .irq_o(irq)
-  );
 
 endmodule
