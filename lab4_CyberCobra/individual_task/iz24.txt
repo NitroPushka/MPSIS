@@ -1,0 +1,28 @@
+.data
+input_a:  .word 0x00A3   
+input_sw: .word 3       
+output:   .word 0        
+
+.text
+.globl main
+main:
+
+    la   t0, input_a      
+    lw   s0, 0(t0)        
+
+
+    la   t0, input_sw     
+    lw   s1, 0(t0)       
+
+    li   t0, 1       # загружаем знач. 1 в регистр t0       
+    sll  t1, t0, s1    # сдвиг влево "1" на sw_i   
+    addi t2, t1, -1   # вычитаем "1" из маски и записываем в t2    
+
+    xor  s2, s0, t2       
+
+    la   t0, output     # загружаем адрес переменной output    
+    sw   s2, 0(t0)    # сохраняем s2 по этому адресу
+
+
+    li   a7, 10
+    ecall
