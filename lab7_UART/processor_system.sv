@@ -1,0 +1,137 @@
+module processor_system(
+  input  logic        clk_i,
+  input  logic        resetn_i,
+
+  // Входы и выходы периферии
+  input  logic [15:0] sw_i,       // Переключатели
+
+  output logic [15:0] led_o,      // Светодиоды
+
+  input  logic        kclk_i,     // Тактирующий сигнал клавиатуры
+  input  logic        kdata_i,    // Сигнал данных клавиатуры
+
+  output logic [6:0] hex_led_o,  // Вывод семисегментных индикаторов
+  output logic [7:0] hex_sel_o,  // Селектор семисегментных индикаторов
+
+  input  logic        rx_i,       // Линия приёма по UART
+  output logic        tx_o,       // Линия передачи по UART
+
+  output logic [3:0] vga_r_o,    // Красный канал vga
+  output logic [3:0] vga_g_o,    // Зелёный канал vga
+  output logic [3:0] vga_b_o,    // Синий канал vga
+  output logic       vga_hs_o,   // Линия горизонтальной синхронизации vga
+  output logic        vga_vs_o    // Линия вертикальной синхронизации vga
+
+);
+
+
+  import peripheral_pkg::*;
+
+  logic sysclk, rst;
+  sys_clk_rst_gen divider (
+    .ex_clk_i(clk_i),
+    .ex_areset_n_i(resetn_i),
+    .div_i(10),
+    .sys_clk_o(sysclk),
+    .sys_reset_o(rst)
+  );
+
+
+  logic        core_req, core_we, core_stall;
+  logic [2:0]  core_size;
+  logic [31:0] core_addr, core_wd, core_rd;
+  logic [31:0] instr_addr, instr;
+
+
+  logic        mem_req, mem_we;
+  logic [3:0]  mem_be;
+  logic [31:0] mem_addr, mem_wd, mem_rd;
+  logic        mem_ready;
+
+
+  logic [31:0] mem_rd_data;
+
+
+  logic [31:0] rx_rd, tx_rd;
+  logic        rx_irq;
+  wire         rx_req, tx_req, data_mem_req;
+  wire         is_data_mem, is_rx, is_tx;
+
+  processor_core core (
+    .clk_i(sysclk), .rst_i(rst),
+    .stall_i(core_stall),
+    .instr_i(instr),
+    .mem_rd_i(core_rd),
+    .mem_req_o(core_req),
+    .mem_we_o(core_we),
+    .mem_size_o(core_size),
+    .mem_addr_o(core_addr),
+    .mem_wd_o(core_wd),
+    .instr_addr_o(instr_addr),
+    .irq_req_i(rx_irq),      // прерывание от UART RX
+    .irq_ret_o()
+  );
+
+  instr_mem instruction_memory (
+    .read_addr_i(instr_addr),
+    .read_data_o(instr)
+  );
+
+  lsu load_store_unit (
+    .clk_i(sysclk), .rst_i(rst),
+    .core_req_i(core_req), .core_we_i(core_we), .core_size_i(core_size),
+    .core_addr_i(core_addr), .core_wd_i(core_wd),
+    .core_rd_o(core_rd), .core_stall_o(core_stall),
+    .mem_req_o(mem_req), .mem_we_o(mem_we), .mem_be_o(mem_be),
+    .mem_addr_o(mem_addr), .mem_wd_o(mem_wd),
+    .mem_rd_i(mem_rd), .mem_ready_i(mem_ready)
+  );
+
+  wire [7:0] periph_id = mem_addr[31:24];
+  assign is_data_mem = (periph_id == DMEM_ADDR_HIGH);
+  assign is_rx  = (periph_id == RX_ADDR_HIGH);
+  assign is_tx = (periph_id == TX_ADDR_HIGH);
+
+
+  // mem_req - общий сигнал шины сигнал запроса к памяти ( переферии )
+  assign data_mem_req = mem_req & is_data_mem;
+  assign rx_req = mem_req & is_rx;
+  assign tx_req = mem_req & is_tx;
+
+  data_mem data_memory (
+    .clk_i(sysclk),
+    .mem_req_i(data_mem_req),
+    .write_enable_i(mem_we & is_data_mem),
+    .byte_enable_i(mem_be),
+    .addr_i(mem_addr),
+    .write_data_i(mem_wd),
+    .read_data_o(mem_rd_data),
+    .ready_o(mem_ready)
+  );
+
+  uart_rx_sb_ctrl rx(
+    .clk_i(sysclk), .rst_i(rst),
+    .addr_i(mem_addr), .req_i(rx_req),
+    .write_data_i(mem_wd), .write_enable_i(mem_we),
+    .read_data_o(rx_rd),
+    .interrupt_request_o(rx_irq),
+    .interrupt_return_i(1'b0),
+    .rx_i(rx_i)
+  );
+
+  uart_tx_sb_ctrl tx(
+    .clk_i(sysclk), .rst_i(rst),
+    .addr_i(mem_addr), .req_i(tx_req),
+    .write_data_i(mem_wd), .write_enable_i(mem_we),
+    .read_data_o(tx_rd),
+    .tx_o(tx_o)
+  );
+
+  always_comb begin
+    if (is_data_mem) mem_rd = mem_rd_data;
+    else if (is_rx)  mem_rd = rx_rd;
+    else if (is_tx)  mem_rd = tx_rd;
+    else             mem_rd = 32'b0;
+  end
+
+endmodule
